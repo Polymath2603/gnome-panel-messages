@@ -1,0 +1,183 @@
+#!/bin/bash
+# panel-message — Control the GNOME Panel Messages extension from the command line.
+#
+# Usage:
+#   panel-message                           Show current message
+#   panel-message "text"                    Set the message
+#   panel-message -c, --clear               Clear the message
+#
+#   panel-message --color=red "text"        Set message with persistent color
+#   panel-message --bold "text"             Set message bold (persistent)
+#   panel-message --no-bold "text"          Set message without bold
+#   panel-message --style "text"            Show current style settings
+#
+#   panel-message --alert "text"            Set message + flash red bold then fade
+#   panel-message --alert=#00ff00 "text"    Alert with custom color
+#
+#   panel-message --position=center         Change panel position
+#   panel-message --index=3                 Change ordering index
+#   panel-message --default-text="..."      Set default/placeholder text
+#
+#   panel-message -q, --quiet               Suppress all output (for scripts)
+
+SCHEMA="org.gnome.shell.extensions.panel-messages"
+KEY_MESSAGE="message"
+KEY_DEFAULT="default-text"
+KEY_COLOR="color"
+KEY_BOLD="bold"
+KEY_POSITION="position"
+KEY_INDEX="index"
+KEY_ALERT="alert"
+KEY_ALERT_COLOR="alert-color"
+
+QUIET=false
+ALERT=false
+ALERT_COLOR=""
+SET_TEXT=""
+SET_COLOR=""
+SET_BOLD=""
+SET_POSITION=""
+SET_INDEX=""
+SET_DEFAULT=""
+SHOW_STYLE=false
+CLEAR=false
+
+# ── Parse options ───────────────────────────────────────────
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -q|--quiet) QUIET=true; shift ;;
+        -c|--clear) CLEAR=true; shift ;;
+        --style)    SHOW_STYLE=true; shift ;;
+        --alert|--alert=*)
+            ALERT=true
+            if [[ "$1" == --alert=* ]]; then
+                ALERT_COLOR="${1#*=}"
+            fi
+            shift
+            ;;
+        --color=*)
+            SET_COLOR="${1#*=}"
+            shift
+            ;;
+        --bold)
+            SET_BOLD="true"
+            shift
+            ;;
+        --no-bold)
+            SET_BOLD="false"
+            shift
+            ;;
+        --position=*)
+            SET_POSITION="${1#*=}"
+            shift
+            ;;
+        --index=*)
+            SET_INDEX="${1#*=}"
+            shift
+            ;;
+        --default-text=*)
+            SET_DEFAULT="${1#*=}"
+            shift
+            ;;
+        -h|--help)
+            sed -n '2,22p' "$0" | sed 's/^# //'
+            exit 0
+            ;;
+        -*)
+            echo "Unknown option: $1"
+            echo "Use --help for usage."
+            exit 1
+            ;;
+        *)
+            # First positional argument = the message text
+            SET_TEXT="$1"
+            shift
+            ;;
+    esac
+done
+
+# ── Validate position ──────────────────────────────────────
+if [[ -n "$SET_POSITION" ]]; then
+    case "$SET_POSITION" in
+        far-left|left|center|right|far-right) ;;
+        *) echo "Error: position must be one of: far-left, left, center, right, far-right"; exit 1 ;;
+    esac
+fi
+
+# ── Apply settings ──────────────────────────────────────────
+APPLIED=false
+
+if [[ -n "$SET_COLOR" ]]; then
+    gsettings set "$SCHEMA" "$KEY_COLOR" "$SET_COLOR"
+    APPLIED=true
+fi
+
+if [[ -n "$SET_BOLD" ]]; then
+    gsettings set "$SCHEMA" "$KEY_BOLD" "$SET_BOLD"
+    APPLIED=true
+fi
+
+if [[ -n "$SET_POSITION" ]]; then
+    gsettings set "$SCHEMA" "$KEY_POSITION" "$SET_POSITION"
+    $QUIET || echo "✓ Position set to: $SET_POSITION"
+    APPLIED=true
+fi
+
+if [[ -n "$SET_INDEX" ]]; then
+    gsettings set "$SCHEMA" "$KEY_INDEX" "$SET_INDEX"
+    $QUIET || echo "✓ Index set to: $SET_INDEX"
+    APPLIED=true
+fi
+
+if [[ -n "$SET_DEFAULT" ]]; then
+    gsettings set "$SCHEMA" "$KEY_DEFAULT" "$SET_DEFAULT"
+    $QUIET || echo "✓ Default text set to: $SET_DEFAULT"
+    APPLIED=true
+fi
+
+if [[ -n "$SET_TEXT" ]]; then
+    gsettings set "$SCHEMA" "$KEY_MESSAGE" "$SET_TEXT"
+    APPLIED=true
+fi
+
+if $CLEAR; then
+    gsettings set "$SCHEMA" "$KEY_MESSAGE" ""
+    $QUIET || echo "✓ Message cleared"
+    APPLIED=true
+fi
+
+# ── Alert (must come after text/color so the flash uses final state) ──
+if $ALERT; then
+    if [[ -n "$ALERT_COLOR" ]]; then
+        gsettings set "$SCHEMA" "$KEY_ALERT_COLOR" "$ALERT_COLOR"
+    fi
+    # Increment the alert trigger counter
+    current=$(gsettings get "$SCHEMA" "$KEY_ALERT")
+    next=$((current + 1))
+    gsettings set "$SCHEMA" "$KEY_ALERT" "$next"
+    $QUIET || echo "⚡ Alert triggered"
+    APPLIED=true
+fi
+
+# ── Show style ──────────────────────────────────────────────
+if $SHOW_STYLE; then
+    echo "Message:      $(gsettings get $SCHEMA $KEY_MESSAGE)"
+    echo "Default text: $(gsettings get $SCHEMA $KEY_DEFAULT)"
+    echo "Color:        $(gsettings get $SCHEMA $KEY_COLOR)"
+    echo "Bold:         $(gsettings get $SCHEMA $KEY_BOLD)"
+    echo "Position:     $(gsettings get $SCHEMA $KEY_POSITION)"
+    echo "Index:        $(gsettings get $SCHEMA $KEY_INDEX)"
+    echo "Alert color:  $(gsettings get $SCHEMA $KEY_ALERT_COLOR)"
+    APPLIED=true
+fi
+
+# ── Fallback: read mode ─────────────────────────────────────
+if ! $APPLIED && ! $CLEAR; then
+    current=$(gsettings get "$SCHEMA" "$KEY_MESSAGE")
+    echo "$current"
+fi
+
+# ── Quiet-mode summary ──────────────────────────────────────
+if ! $QUIET && $APPLIED && [[ -n "$SET_TEXT" ]]; then
+    echo "✓ Panel message set"
+fi

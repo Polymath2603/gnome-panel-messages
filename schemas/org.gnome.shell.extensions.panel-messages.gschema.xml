@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+
+  <schema id="org.gnome.shell.extensions.panel-messages"
+          path="/org/gnome/shell/extensions/panel-messages/">
+
+    <key type="s" name="message">
+      <default>""</default>
+      <summary>The message shown in the GNOME panel.</summary>
+      <description>
+        Set interactively via the popup entry, or from the command line
+        with `panel-message "your text here"`.
+      </description>
+    </key>
+
+    <key type="s" name="default-text">
+      <default>"—"</default>
+      <summary>Fallback text shown when message is empty.</summary>
+      <description>
+        When the message key is empty, this placeholder text is displayed
+        so the panel label is never invisible.
+      </description>
+    </key>
+
+    <key type="s" name="position">
+      <default>"far-right"</default>
+      <summary>Panel position.</summary>
+      <description>
+        Where the indicator sits in the GNOME panel.
+        Allowed values: far-left, left, center, right, far-right.
+      </description>
+    </key>
+
+    <key type="i" name="index">
+      <default>0</default>
+      <summary>Ordering index within the panel area.</summary>
+      <description>
+        Lower values appear first (leftmost within the area).
+        Only meaningful for position=left/center/right.
+      </description>
+    </key>
+
+    <key type="s" name="color">
+      <default>""</default>
+      <summary>Text color as CSS value.</summary>
+      <description>
+        Any valid CSS color string: named color ("red", "lime"),
+        hex ("#ff3333"), rgb ("rgb(255,0,0)"), etc.
+        Empty string means the theme default.
+      </description>
+    </key>
+
+    <key type="b" name="bold">
+      <default>false</default>
+      <summary>Whether the text is bold.</summary>
+    </key>
+
+    <key type="i" name="alert">
+      <default>0</default>
+      <summary>Alert trigger counter.</summary>
+      <description>
+        Each time the CLI requests an alert, this counter is incremented.
+        The extension watches it and runs a red-bold flash animation,
+        then fades back to the normal style.
+      </description>
+    </key>
+
+    <key type="s" name="alert-color">
+      <default>"#ff3333"</default>
+      <summary>Color used during alert flashes.</summary>
+    </key>
+
+    <key type="d" name="alert-duration">
+      <default>2.0</default>
+      <summary>How long (seconds) the alert flash lasts before fading back.</summary>
+    </key>
+
+  </schema>
+
+</schemalist>

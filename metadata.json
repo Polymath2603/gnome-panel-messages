@@ -1,0 +1,15 @@
+{
+  "description": "A customizable panel message — update it from the CLI to see background progress",
+  "name": "Panel Messages",
+  "settings-schema": "org.gnome.shell.extensions.panel-messages",
+  "shell-version": [
+    "45",
+    "46",
+    "47",
+    "48",
+    "49",
+    "50"
+  ],
+  "uuid": "panel-messages@leonardo.local",
+  "version": 1
+}
