@@ -128,7 +128,7 @@ export default class PanelMessagesPrefs extends ExtensionPreferences {
             subtitle: 'Ordering within the panel area',
         });
         const idxSpin = new Gtk.SpinButton({
-            adjustment: new Gtk.Adjustation({
+            adjustment: new Gtk.Adjustment({
                 lower: 0, upper: 99, step_increment: 1,
             }),
             valign: Gtk.Align.CENTER,

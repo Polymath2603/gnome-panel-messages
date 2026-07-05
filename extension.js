@@ -8,7 +8,7 @@
  *   - Popup entry for interactive editing
  *   - CLI control via `panel-message` command
  *   - Configurable position (far-left, left, center, right, far-right)
- *   - Text styling (color, bold) from settings or CLI
+ *   - Text styling (colour, bold) from settings or CLI
  *   - Alert flash (red bold → fade back) triggered from CLI
  *   - All settings live-reload — no shell restart needed
  *
@@ -21,52 +21,37 @@ import Clutter from 'gi://Clutter';
 import GLib from 'gi://GLib';
 
 import {Extension, gettext as _} from 'resource:///org/gnome/shell/extensions/extension.js';
+import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
-
-/* ───────────────────────────────────────────
- * Position constants
- * ─────────────────────────────────────────── */
-const POSITIONS = ['far-left', 'left', 'center', 'right', 'far-right'];
 
 /* ───────────────────────────────────────────
  * Indicator — the panel button + popup
  * ─────────────────────────────────────────── */
 const Indicator = GObject.registerClass(
-    class Indicator extends GObject.Object {
+    class Indicator extends PanelMenu.Button {
         _init(settings) {
-            super._init();
+            super._init(0.0, _('Panel Messages'));
 
             this._settings = settings;
             this._alertCount = settings.get_int('alert');
             this._normalStyle = '';
 
-            // ---- Build the panel button ----
-            this.button = new St.Button({
-                style_class: 'panel-button',
-                reactive: true,
-                can_focus: true,
-                track_hover: true,
-                x_expand: false,
-                y_expand: true,
-            });
+            // Helper: show default-text when message is empty
+            const displayText = (raw) =>
+                raw === '' ? settings.get_string('default-text') : raw;
 
             // ---- Panel label ----
             this._label = new St.Label({
-                text: this._displayText(settings.get_string('message')),
+                text: displayText(settings.get_string('message')),
                 y_expand: true,
                 y_align: Clutter.ActorAlign.CENTER,
-                x_align: Clutter.ActorAlign.CENTER,
             });
-            this.button.add_child(this._label);
+            this.add_child(this._label);
 
-            // ---- Popup menu ----
-            this._menu = new PopupMenu.PopupMenu(this.button, St.Side.TOP);
-            this._menu.actor.add_style_class_name('panel-messages-menu');
-
-            // ---- Popup entry ----
+            // ---- Popup entry for interactive editing ----
             this._entry = new St.Entry({
-                text: this._displayText(settings.get_string('message')),
+                text: displayText(settings.get_string('message')),
                 can_focus: true,
                 track_hover: true,
             });
@@ -75,22 +60,16 @@ const Indicator = GObject.registerClass(
                 style_class: 'popup-menu-icon',
             }));
 
-            // Entry text-changed → update GSettings + label
             this._entry.clutter_text.connect('text-changed', () => {
-                let text = this._entry.get_text();
+                const text = this._entry.get_text();
                 settings.set_string('message', text);
-                this._label.text = this._displayText(text);
+                this._label.text = displayText(text);
             });
 
-            let popupSection = new PopupMenu.PopupMenuSection();
+            const popupSection = new PopupMenu.PopupMenuSection();
             popupSection.actor.add_child(this._entry);
-            this._menu.addMenuItem(popupSection);
-            this._menu.actor.add_style_class_name('panel-message-entry');
-
-            // Button click → toggle popup
-            this.button.connect('button-release-event', () => {
-                this._menu.toggle();
-            });
+            this.menu.addMenuItem(popupSection);
+            this.menu.actor.add_style_class_name('panel-message-entry');
 
             // ---- Apply persistent style ----
             this._applyStyle();
@@ -99,14 +78,15 @@ const Indicator = GObject.registerClass(
             this._signalHandles = [];
 
             this._signalHandles.push(settings.connect('changed::message', () => {
-                let newText = settings.get_string('message');
-                this._label.text = this._displayText(newText);
-                this._entry.text = this._displayText(newText);
+                const text = settings.get_string('message');
+                this._label.text = displayText(text);
+                this._entry.text = displayText(text);
             }));
 
             this._signalHandles.push(settings.connect('changed::default-text', () => {
-                this._label.text = this._displayText(settings.get_string('message'));
-                this._entry.text = this._displayText(settings.get_string('message'));
+                const text = settings.get_string('message');
+                this._label.text = displayText(text);
+                this._entry.text = displayText(text);
             }));
 
             this._signalHandles.push(settings.connect('changed::color', () => {
@@ -122,41 +102,31 @@ const Indicator = GObject.registerClass(
                 const count = settings.get_int('alert');
                 if (count !== this._alertCount) {
                     this._alertCount = count;
-                    this._runAlert(settings.get_string('alert-color'),
-                                   settings.get_double('alert-duration'));
+                    this._runAlert(
+                        settings.get_string('alert-color'),
+                        settings.get_double('alert-duration')
+                    );
                 }
             }));
         }
 
-        /* ───── Helper: display text with fallback ───── */
-        _displayText(raw) {
-            if (raw === '')
-                return this._settings.get_string('default-text');
-            return raw;
-        }
-
-        /* ───── Apply persistent color + bold ───── */
+        /* ───── Apply persistent colour + bold ───── */
         _applyStyle() {
             const color = this._settings.get_string('color');
             const bold = this._settings.get_boolean('bold');
-            let styles = [];
-            if (color)
-                styles.push(`color: ${color}`);
-            if (bold)
-                styles.push('font-weight: bold');
+            const styles = [];
+            if (color) styles.push(`color: ${color}`);
+            if (bold) styles.push('font-weight: bold');
             this._normalStyle = styles.join('; ');
             this._label.style = this._normalStyle;
         }
 
         /* ───── Alert flash animation ───── */
-        _runAlert(alertColor, durationMs) {
-            // Cap duration
-            durationMs = Math.min(durationMs * 1000, 10000);
+        _runAlert(alertColor, durationSec) {
+            const holdMs = Math.min(durationSec * 600, 3000);
+            const fadeMs = Math.min(durationSec * 400, 2000);
 
-            const holdMs = Math.min(durationMs * 0.6, 3000);
-            const fadeMs = Math.min(durationMs * 0.4, 2000);
-
-            // 1) Apply alert style
+            // 1) Apply alert style instantly
             this._label.style = `color: ${alertColor}; font-weight: bold;`;
 
             // 2) Hold, then ease opacity to 0
@@ -166,7 +136,7 @@ const Indicator = GObject.registerClass(
                     duration: fadeMs / 2,
                     mode: Clutter.AnimationMode.EASE_OUT_QUAD,
                     onComplete: () => {
-                        // 3) Restore normal style, then fade back in
+                        // 3) Restore normal style, fade back in
                         this._label.style = this._normalStyle;
                         this._label.set_opacity(0);
                         this._label.ease({
@@ -182,22 +152,11 @@ const Indicator = GObject.registerClass(
 
         /* ───── Clean up ───── */
         destroy() {
-            this._signalHandles.forEach(id => {
-                if (id) {
-                    try { this._settings.disconnect(id); } catch (e) { /* already gone */ }
-                }
+            (this._signalHandles || []).forEach(id => {
+                try { this._settings.disconnect(id); } catch (e) { /* ok */ }
             });
             this._signalHandles = null;
-
-            if (this._menu) {
-                this._menu.destroy();
-                this._menu = null;
-            }
-            if (this.button) {
-                this.button.destroy();
-                this.button = null;
-            }
-
+            this._settings = null;
             super.destroy();
         }
     });
@@ -218,27 +177,21 @@ export default class PanelMessagesExtension extends Extension {
             const newPos = this._settings.get_string('position');
             if (newPos !== this._position) {
                 this._position = newPos;
-                this._removeFromPanel();
-                this._addToPanel();
+                this._reposition();
             }
         });
 
-        // Re-index (if position uses index)
         this._idxSignal = this._settings.connect('changed::index', () => {
-            this._removeFromPanel();
-            this._addToPanel();
+            this._reposition();
         });
     }
 
     disable() {
-        if (this._posSignal) {
-            this._settings.disconnect(this._posSignal);
-            this._posSignal = null;
-        }
-        if (this._idxSignal) {
-            this._settings.disconnect(this._idxSignal);
-            this._idxSignal = null;
-        }
+        [this._posSignal, this._idxSignal].forEach(id => {
+            if (id) { try { this._settings.disconnect(id); } catch (e) { /* ok */ } }
+        });
+        this._posSignal = null;
+        this._idxSignal = null;
 
         this._removeFromPanel();
 
@@ -246,9 +199,7 @@ export default class PanelMessagesExtension extends Extension {
             this._indicator.destroy();
             this._indicator = null;
         }
-        if (this._settings) {
-            this._settings = null;
-        }
+        this._settings = null;
     }
 
     /* ───── Insert into the right panel box ───── */
@@ -258,43 +209,43 @@ export default class PanelMessagesExtension extends Extension {
 
         switch (position) {
             case 'far-left':
-                Main.panel._leftBox.insert_child_at_index(this._indicator.button, 0);
+                Main.panel._leftBox.insert_child_at_index(this._indicator, 0);
                 break;
             case 'left':
-                this._insertAtIndex(Main.panel._leftBox, index);
+                this._insertAt(Main.panel._leftBox, index);
                 break;
             case 'center':
-                this._insertAtIndex(Main.panel._centerBox, index);
+                this._insertAt(Main.panel._centerBox, index);
                 break;
             case 'right':
-                this._insertAtIndex(Main.panel._rightBox, index);
+                this._insertAt(Main.panel._rightBox, index);
                 break;
             case 'far-right':
             default:
-                Main.panel._rightBox.add_child(this._indicator.button);
+                Main.panel._rightBox.add_child(this._indicator);
                 break;
         }
 
-        // Ensure the indicator shows above other panel children
-        this._indicator.button.show();
+        this._indicator.show();
     }
 
     _removeFromPanel() {
-        if (!this._indicator || !this._indicator.button)
-            return;
-
-        // Remove from whatever parent it's attached to
-        const parent = this._indicator.button.get_parent();
+        if (!this._indicator) return;
+        const parent = this._indicator.get_parent();
         if (parent)
-            parent.remove_child(this._indicator.button);
+            parent.remove_child(this._indicator);
     }
 
-    _insertAtIndex(box, index) {
+    _reposition() {
+        this._removeFromPanel();
+        this._addToPanel();
+    }
+
+    _insertAt(box, index) {
         const children = box.get_children();
-        if (index < 0 || index >= children.length) {
-            box.add_child(this._indicator.button);
-        } else {
-            box.insert_child_at_index(this._indicator.button, index);
-        }
+        if (index < 0 || index >= children.length)
+            box.add_child(this._indicator);
+        else
+            box.insert_child_at_index(this._indicator, index);
     }
 }
