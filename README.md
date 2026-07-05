@@ -115,11 +115,22 @@ gnome-panel-messages/
 │   └── gschemas.compiled # Compiled schema binary
 ├── bin/
 │   └── panel-message     # CLI command
-├── install.sh            # One-command installer
+├── install.sh            # One-command installer (ext + CLI + Hermes skill)
 ├── docs/
 │   ├── guide.md          # Usage guide
+│   ├── hermes-skill.md   # Hermes Agent skill (installed automatically)
 │   └── development.md    # Development notes
 └── README.md
+```
+
+## Hermes Agent skill
+
+The repo includes a Hermes skill at `docs/hermes-skill.md`. When you run `install.sh`, it's automatically placed into `~/.hermes/skills/productivity/panel-messages/SKILL.md` so Hermes knows to use `panel-message` for background-progress updates instead of sending you chat messages.
+
+To install manually:
+```bash
+mkdir -p ~/.hermes/skills/productivity/panel-messages
+cp docs/hermes-skill.md ~/.hermes/skills/productivity/panel-messages/SKILL.md
 ```
 
 ---

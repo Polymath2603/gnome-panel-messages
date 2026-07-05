@@ -5,3 +5,4 @@ __pycache__/
 *.swo
 *~
 .DS_Store
+schemas/gschemas.compiled
