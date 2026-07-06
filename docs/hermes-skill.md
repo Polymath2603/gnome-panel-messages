@@ -21,6 +21,8 @@ Good for:
 
 ## CLI Usage
 
+All `panel-message` calls below are **terminal commands** — run them via `terminal()`.
+
 ```bash
 panel-message "text"                          # Set message
 panel-message -q "text"                       # Set silently (no stdout)
