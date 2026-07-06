@@ -9,7 +9,7 @@
  *   - CLI control via `panel-message` command
  *   - Configurable position (far-left, left, center, right, far-right)
  *   - Text styling (colour, bold) from settings or CLI
- *   - Alert flash (red bold → fade back) triggered from CLI
+ *   - Alert flash (smooth colour morph → hold → morph back) triggered from CLI
  *   - All settings live-reload — no shell restart needed
  *
  * SPDX-License-Identifier: GPL-2.0-or-later
@@ -36,9 +36,10 @@ const Indicator = GObject.registerClass(
             this._settings = settings;
             this._alertCount = settings.get_int('alert');
             this._normalStyle = '';
+            this._normalColor = null; // cached Clutter.Color
 
             // Helper: show default-text when message is empty
-            const displayText = (raw) =>
+            const displayText = raw =>
                 raw === '' ? settings.get_string('default-text') : raw;
 
             // ---- Panel label ----
@@ -73,6 +74,8 @@ const Indicator = GObject.registerClass(
 
             // ---- Apply persistent style ----
             this._applyStyle();
+            // Cache the original color from the style
+            this._cacheNormalColor();
 
             // ---- Watch GSettings changes ----
             this._signalHandles = [];
@@ -91,13 +94,14 @@ const Indicator = GObject.registerClass(
 
             this._signalHandles.push(settings.connect('changed::color', () => {
                 this._applyStyle();
+                this._cacheNormalColor();
             }));
 
             this._signalHandles.push(settings.connect('changed::bold', () => {
                 this._applyStyle();
             }));
 
-            // Alert trigger — run flash animation
+            // Alert trigger — run colour morph animation
             this._signalHandles.push(settings.connect('changed::alert', () => {
                 const count = settings.get_int('alert');
                 if (count !== this._alertCount) {
@@ -108,6 +112,16 @@ const Indicator = GObject.registerClass(
                     );
                 }
             }));
+        }
+
+        /* ───── Cache current text colour from ClutterText ───── */
+        _cacheNormalColor() {
+            try {
+                const ct = this._label.clutter_text;
+                this._normalColor = ct.get_color();
+            } catch (e) {
+                this._normalColor = null;
+            }
         }
 
         /* ───── Apply persistent colour + bold ───── */
@@ -121,32 +135,47 @@ const Indicator = GObject.registerClass(
             this._label.style = this._normalStyle;
         }
 
-        /* ───── Alert flash animation ───── */
+        /* ───── Alert animation: morph to red bold, hold, morph back ───── */
         _runAlert(alertColor, durationSec) {
-            const holdMs = Math.min(durationSec * 600, 3000);
-            const fadeMs = Math.min(durationSec * 400, 2000);
+            const morphMs = Math.max(200, Math.min(durationSec * 150, 800));
+            const holdMs = Math.max(500, Math.min(durationSec * 700, 4000));
 
-            // 1) Apply alert style instantly
-            this._label.style = `color: ${alertColor}; font-weight: bold;`;
+            // Parse the target alert colour
+            let targetColor;
+            try {
+                [, targetColor] = Clutter.Color.from_string(alertColor);
+            } catch (e) {
+                [, targetColor] = Clutter.Color.from_string('#ff3333');
+            }
 
-            // 2) Hold, then ease opacity to 0
-            GLib.timeout_add(GLib.PRIORITY_DEFAULT, holdMs, () => {
-                this._label.ease({
-                    opacity: 0,
-                    duration: fadeMs / 2,
-                    mode: Clutter.AnimationMode.EASE_OUT_QUAD,
-                    onComplete: () => {
-                        // 3) Restore normal style, fade back in
-                        this._label.style = this._normalStyle;
-                        this._label.set_opacity(0);
-                        this._label.ease({
-                            opacity: 255,
-                            duration: fadeMs / 2,
-                            mode: Clutter.AnimationMode.EASE_IN_QUAD,
+            const ct = this._label.clutter_text;
+            if (!ct) return;
+
+            // 1) Turn bold on (instant). Colour is still normal.
+            this._label.style = `font-weight: bold; ${this._settings.get_string('color') ? `color: ${this._settings.get_string('color')}` : ''}`;
+
+            // 2) Animate colour from normal → alert
+            ct.ease({
+                color: targetColor,
+                duration: morphMs,
+                mode: Clutter.AnimationMode.EASE_IN_OUT_QUAD,
+                onComplete: () => {
+                    // 3) Hold at red bold
+                    GLib.timeout_add(GLib.PRIORITY_DEFAULT, holdMs, () => {
+                        // 4) Animate colour back to normal
+                        const fallback = Clutter.Color.from_string('#ffffff')[1];
+                        ct.ease({
+                            color: this._normalColor || fallback,
+                            duration: morphMs,
+                            mode: Clutter.AnimationMode.EASE_IN_OUT_QUAD,
+                            onComplete: () => {
+                                // 5) Restore normal style (removes bold)
+                                this._label.style = this._normalStyle;
+                            },
                         });
-                    },
-                });
-                return GLib.SOURCE_REMOVE;
+                        return GLib.SOURCE_REMOVE;
+                    });
+                },
             });
         }
 
@@ -172,7 +201,7 @@ export default class PanelMessagesExtension extends Extension {
 
         this._addToPanel();
 
-        // Reposition on setting change
+        // Reposition when the user changes position or index
         this._posSignal = this._settings.connect('changed::position', () => {
             const newPos = this._settings.get_string('position');
             if (newPos !== this._position) {
@@ -202,7 +231,13 @@ export default class PanelMessagesExtension extends Extension {
         this._settings = null;
     }
 
-    /* ───── Insert into the right panel box ───── */
+    /* ───── Insert into / remove from the panel ─────
+     *
+     * We use plain box insertion for ALL positions instead of
+     * addToStatusArea(), because that API does internal bookkeeping
+     * that conflicts with repeated repositioning.  Direct
+     * add/remove is fully reliable.                        */
+
     _addToPanel() {
         const position = this._position || 'far-right';
         const index = this._settings.get_int('index');
