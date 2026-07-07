@@ -1,4 +1,14 @@
 /* Panel Messages - custom styling */
+
+.panel-message-menu {
+    min-width: 24em;
+}
+
 .panel-message-entry {
     min-width: 22em;
+    padding: 6px;
+}
+
+.panel-message-entry StEntry {
+    padding: 4px 8px;
 }

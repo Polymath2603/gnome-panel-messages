@@ -1,16 +1,6 @@
 /* extension.js
  *
  * Panel Messages — A GNOME Shell extension that shows a message in the panel.
- * The message can be updated interactively via the popup entry OR from the
- * command line with `panel-message "new text"`.
- *
- * Features:
- *   - Popup entry for interactive editing
- *   - CLI control via `panel-message` command
- *   - Configurable position (far-left, left, center, right, far-right)
- *   - Text styling (colour, bold) from settings or CLI
- *   - Alert flash (smooth colour morph → hold → morph back) triggered from CLI
- *   - All settings live-reload — no shell restart needed
  *
  * SPDX-License-Identifier: GPL-2.0-or-later
  */
@@ -26,7 +16,7 @@ import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 /* ───────────────────────────────────────────
- * Indicator — the panel button + popup
+ * Indicator
  * ─────────────────────────────────────────── */
 const Indicator = GObject.registerClass(
     class Indicator extends PanelMenu.Button {
@@ -36,21 +26,21 @@ const Indicator = GObject.registerClass(
             this._settings = settings;
             this._alertCount = settings.get_int('alert');
             this._normalStyle = '';
-            this._normalColor = null; // cached Clutter.Color
+            this._normalColor = null;
 
-            // Helper: show default-text when message is empty
             const displayText = raw =>
                 raw === '' ? settings.get_string('default-text') : raw;
 
-            // ---- Panel label ----
+            // ---- Panel label with padding via style ----
             this._label = new St.Label({
                 text: displayText(settings.get_string('message')),
                 y_expand: true,
                 y_align: Clutter.ActorAlign.CENTER,
+                style: 'padding: 0 6px;',
             });
             this.add_child(this._label);
 
-            // ---- Popup entry for interactive editing ----
+            // ---- Popup entry ----
             this._entry = new St.Entry({
                 text: displayText(settings.get_string('message')),
                 can_focus: true,
@@ -74,35 +64,27 @@ const Indicator = GObject.registerClass(
 
             // ---- Apply persistent style ----
             this._applyStyle();
-            // Cache the original color from the style
             this._cacheNormalColor();
 
-            // ---- Watch GSettings changes ----
-            this._signalHandles = [];
-
-            this._signalHandles.push(settings.connect('changed::message', () => {
+            // ---- External GSettings watchers ----
+            this._sigMessage = settings.connect('changed::message', () => {
                 const text = settings.get_string('message');
                 this._label.text = displayText(text);
                 this._entry.text = displayText(text);
-            }));
-
-            this._signalHandles.push(settings.connect('changed::default-text', () => {
+            });
+            this._sigDefault = settings.connect('changed::default-text', () => {
                 const text = settings.get_string('message');
                 this._label.text = displayText(text);
                 this._entry.text = displayText(text);
-            }));
-
-            this._signalHandles.push(settings.connect('changed::color', () => {
+            });
+            this._sigColor = settings.connect('changed::color', () => {
                 this._applyStyle();
                 this._cacheNormalColor();
-            }));
-
-            this._signalHandles.push(settings.connect('changed::bold', () => {
+            });
+            this._sigBold = settings.connect('changed::bold', () => {
                 this._applyStyle();
-            }));
-
-            // Alert trigger — run colour morph animation
-            this._signalHandles.push(settings.connect('changed::alert', () => {
+            });
+            this._sigAlert = settings.connect('changed::alert', () => {
                 const count = settings.get_int('alert');
                 if (count !== this._alertCount) {
                     this._alertCount = count;
@@ -111,36 +93,31 @@ const Indicator = GObject.registerClass(
                         settings.get_double('alert-duration')
                     );
                 }
-            }));
+            });
         }
 
-        /* ───── Cache current text colour from ClutterText ───── */
         _cacheNormalColor() {
             try {
-                const ct = this._label.clutter_text;
-                this._normalColor = ct.get_color();
+                this._normalColor = this._label.clutter_text.get_color();
             } catch (e) {
                 this._normalColor = null;
             }
         }
 
-        /* ───── Apply persistent colour + bold ───── */
         _applyStyle() {
             const color = this._settings.get_string('color');
             const bold = this._settings.get_boolean('bold');
-            const styles = [];
+            const styles = ['padding: 0 6px;'];
             if (color) styles.push(`color: ${color}`);
             if (bold) styles.push('font-weight: bold');
-            this._normalStyle = styles.join('; ');
+            this._normalStyle = styles.join(' ');
             this._label.style = this._normalStyle;
         }
 
-        /* ───── Alert animation: morph to red bold, hold, morph back ───── */
         _runAlert(alertColor, durationSec) {
             const morphMs = Math.max(200, Math.min(durationSec * 150, 800));
             const holdMs = Math.max(500, Math.min(durationSec * 700, 4000));
 
-            // Parse the target alert colour
             let targetColor;
             try {
                 [, targetColor] = Clutter.Color.from_string(alertColor);
@@ -151,25 +128,26 @@ const Indicator = GObject.registerClass(
             const ct = this._label.clutter_text;
             if (!ct) return;
 
-            // 1) Turn bold on (instant). Colour is still normal.
-            this._label.style = `font-weight: bold; ${this._settings.get_string('color') ? `color: ${this._settings.get_string('color')}` : ''}`;
+            // 1) Bold on, keep current colour
+            const curColor = this._settings.get_string('color');
+            this._label.style = `padding: 0 6px; font-weight: bold;${curColor ? ` color: ${curColor};` : ''}`;
 
-            // 2) Animate colour from normal → alert
+            // 2) Morph colour → alert
             ct.ease({
                 color: targetColor,
                 duration: morphMs,
                 mode: Clutter.AnimationMode.EASE_IN_OUT_QUAD,
                 onComplete: () => {
-                    // 3) Hold at red bold
+                    // 3) Hold
                     GLib.timeout_add(GLib.PRIORITY_DEFAULT, holdMs, () => {
-                        // 4) Animate colour back to normal
+                        // 4) Morph colour → normal
                         const fallback = Clutter.Color.from_string('#ffffff')[1];
                         ct.ease({
                             color: this._normalColor || fallback,
                             duration: morphMs,
                             mode: Clutter.AnimationMode.EASE_IN_OUT_QUAD,
                             onComplete: () => {
-                                // 5) Restore normal style (removes bold)
+                                // 5) Restore normal style
                                 this._label.style = this._normalStyle;
                             },
                         });
@@ -179,51 +157,45 @@ const Indicator = GObject.registerClass(
             });
         }
 
-        /* ───── Clean up ───── */
         destroy() {
-            (this._signalHandles || []).forEach(id => {
-                try { this._settings.disconnect(id); } catch (e) { /* ok */ }
-            });
-            this._signalHandles = null;
+            const s = this._settings;
+            if (!s) return;
+            for (const id of [this._sigMessage, this._sigDefault, this._sigColor,
+                               this._sigBold, this._sigAlert]) {
+                try { s.disconnect(id); } catch (_) {}
+            }
             this._settings = null;
             super.destroy();
         }
     });
 
 /* ───────────────────────────────────────────
- * Extension entry point
+ * Extension
  * ─────────────────────────────────────────── */
 export default class PanelMessagesExtension extends Extension {
     enable() {
         this._settings = this.getSettings();
         this._indicator = new Indicator(this._settings);
-        this._position = this._settings.get_string('position');
 
-        this._addToPanel();
+        // Use the panel's official API — it handles bookkeeping internally
+        Main.panel.addToStatusArea(this.uuid, this._indicator);
 
-        // Reposition when the user changes position or index
-        this._posSignal = this._settings.connect('changed::position', () => {
-            const newPos = this._settings.get_string('position');
-            if (newPos !== this._position) {
-                this._position = newPos;
-                this._reposition();
-            }
+        // Listen for position/index changes.  Instead of repositioning the
+        // indicator ourselves (which can cause race conditions with the
+        // panel's own bookkeeping), we store the desired state and
+        // re-apply it via addToStatusArea.
+        this._posChanged = this._settings.connect('changed::position', () => {
+            this._reposition();
         });
-
-        this._idxSignal = this._settings.connect('changed::index', () => {
+        this._idxChanged = this._settings.connect('changed::index', () => {
             this._reposition();
         });
     }
 
     disable() {
-        [this._posSignal, this._idxSignal].forEach(id => {
-            if (id) { try { this._settings.disconnect(id); } catch (e) { /* ok */ } }
-        });
-        this._posSignal = null;
-        this._idxSignal = null;
-
-        this._removeFromPanel();
-
+        for (const id of [this._posChanged, this._idxChanged]) {
+            try { this._settings.disconnect(id); } catch (_) {}
+        }
         if (this._indicator) {
             this._indicator.destroy();
             this._indicator = null;
@@ -231,15 +203,19 @@ export default class PanelMessagesExtension extends Extension {
         this._settings = null;
     }
 
-    /* ───── Insert into / remove from the panel ─────
+    /** Move the indicator to its configured position.
      *
-     * We use plain box insertion for ALL positions instead of
-     * addToStatusArea(), because that API does internal bookkeeping
-     * that conflicts with repeated repositioning.  Direct
-     * add/remove is fully reliable.                        */
+     *  We always remove-then-reinsert.  Clutter actors that are already
+     *  children of a container are silently moved when added/inserted
+     *  into another container, so there is no risk of duplicates.
+     */
+    _reposition() {
+        if (!this._indicator) return;
 
-    _addToPanel() {
-        const position = this._position || 'far-right';
+        const parent = this._indicator.get_parent();
+        if (parent) parent.remove_child(this._indicator);
+
+        const position = this._settings.get_string('position') || 'far-right';
         const index = this._settings.get_int('index');
 
         switch (position) {
@@ -253,27 +229,14 @@ export default class PanelMessagesExtension extends Extension {
                 this._insertAt(Main.panel._centerBox, index);
                 break;
             case 'right':
-                this._insertAt(Main.panel._rightBox, index);
-                break;
             case 'far-right':
             default:
-                Main.panel._rightBox.add_child(this._indicator);
+                Main.panel.addToStatusArea(this.uuid, this._indicator,
+                    position === 'right' ? index : -1, 'right');
                 break;
         }
 
         this._indicator.show();
-    }
-
-    _removeFromPanel() {
-        if (!this._indicator) return;
-        const parent = this._indicator.get_parent();
-        if (parent)
-            parent.remove_child(this._indicator);
-    }
-
-    _reposition() {
-        this._removeFromPanel();
-        this._addToPanel();
     }
 
     _insertAt(box, index) {
