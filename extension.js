@@ -221,23 +221,21 @@ export default class PanelMessagesExtension extends Extension {
         const pos = this._currentPos;
         const idx = this._currentIdx;
 
-        // Box & index: pass to addToStatusArea.
-        // For center: register in right box first, then move to center.
-        // For all others: addToStatusArea handles it.
         if (pos === 'far-left' || pos === 'left') {
             Main.panel.addToStatusArea(this.uuid, this._indicator, idx, 'left');
         } else if (pos === 'center') {
-            // addToStatusArea only supports 'left'/'right', so we register
-            // with 'right' then immediately move to center.
-            Main.panel.addToStatusArea(this.uuid, this._indicator, 0, 'right');
-            // Move to center using proper index
-            const centerBox = Main.panel._centerBox;
-            const children = centerBox.get_children();
-            const targetIdx = Math.min(idx, children.length);
-            if (targetIdx < children.length)
-                centerBox.insert_child_at_index(this._indicator, targetIdx);
+            // addToStatusArea only supports 'left'/'right', so for centre
+            // we insert directly into _centerBox.  Clear the statusArea
+            // entry first so the shell doesn't try to manage it.
+            if (Main.panel.statusArea[this.uuid])
+                Main.panel.statusArea[this.uuid] = null;
+            const box = Main.panel._centerBox;
+            const children = box.get_children();
+            const n = children.length;
+            if (idx < 0 || idx >= n)
+                box.add_child(this._indicator);
             else
-                centerBox.add_child(this._indicator);
+                box.insert_child_at_index(this._indicator, idx);
         } else {
             // right / far-right
             Main.panel.addToStatusArea(this.uuid, this._indicator,
