@@ -1,6 +1,8 @@
 /* extension.js
  *
  * Panel Messages — A GNOME Shell extension with CLI control.
+ * Uses hijridate's proven pattern: destroy+recreate on reposition,
+ * always register via addToStatusArea, never manually remove_child.
  *
  * SPDX-License-Identifier: GPL-2.0-or-later
  */
@@ -27,9 +29,6 @@ const Indicator = GObject.registerClass(
             this._alertCount = settings.get_int('alert');
             this._normalStyle = '';
             this._normalColor = null;
-
-            // Standard panel button sizing
-            this.style = 'padding: 0 4px;';
 
             const displayText = raw =>
                 raw === '' ? settings.get_string('default-text') : raw;
@@ -67,41 +66,40 @@ const Indicator = GObject.registerClass(
             this._applyStyle();
             this._cacheNormalColor();
 
-            // ---- External GSettings watchers ----
+            // ---- Watch GSettings for external changes ----
             this._connectSignals();
         }
 
         _connectSignals() {
             const s = this._settings;
-            this._sig = [
-                s.connect('changed::message', () => {
-                    const text = s.get_string('message');
-                    this._label.text = this._displayText(text);
-                    this._entry.text = this._displayText(text);
-                }),
-                s.connect('changed::default-text', () => {
-                    const text = s.get_string('message');
-                    this._label.text = this._displayText(text);
-                    this._entry.text = this._displayText(text);
-                }),
-                s.connect('changed::color', () => {
-                    this._applyStyle();
-                    this._cacheNormalColor();
-                }),
-                s.connect('changed::bold', () => {
-                    this._applyStyle();
-                }),
-                s.connect('changed::alert', () => {
-                    const count = s.get_int('alert');
-                    if (count !== this._alertCount) {
-                        this._alertCount = count;
-                        this._runAlert(
-                            s.get_string('alert-color'),
-                            s.get_double('alert-duration')
-                        );
-                    }
-                }),
-            ];
+
+            this._sigLabel = s.connect('changed::message', () => {
+                const text = s.get_string('message');
+                this._label.text = this._displayText(text);
+                this._entry.text = this._displayText(text);
+            });
+            this._sigDefault = s.connect('changed::default-text', () => {
+                const text = s.get_string('message');
+                this._label.text = this._displayText(text);
+                this._entry.text = this._displayText(text);
+            });
+            this._sigColor = s.connect('changed::color', () => {
+                this._applyStyle();
+                this._cacheNormalColor();
+            });
+            this._sigBold = s.connect('changed::bold', () => {
+                this._applyStyle();
+            });
+            this._sigAlert = s.connect('changed::alert', () => {
+                const count = s.get_int('alert');
+                if (count !== this._alertCount) {
+                    this._alertCount = count;
+                    this._runAlert(
+                        s.get_string('alert-color'),
+                        s.get_double('alert-duration')
+                    );
+                }
+            });
         }
 
         _displayText(raw) {
@@ -166,10 +164,10 @@ const Indicator = GObject.registerClass(
         }
 
         destroy() {
-            (this._sig || []).forEach(id => {
+            for (const id of [this._sigLabel, this._sigDefault, this._sigColor,
+                               this._sigBold, this._sigAlert]) {
                 try { this._settings.disconnect(id); } catch (_) {}
-            });
-            this._sig = null;
+            }
             this._settings = null;
             super.destroy();
         }
@@ -181,21 +179,32 @@ const Indicator = GObject.registerClass(
 export default class PanelMessagesExtension extends Extension {
     enable() {
         this._settings = this.getSettings();
-        this._indicator = new Indicator(this._settings);
         this._currentPos = this._settings.get_string('position') || 'far-right';
+        this._currentIdx = this._settings.get_int('index');
 
-        this._placeInPanel();
+        this._indicator = new Indicator(this._settings);
+        this._registerInPanel();
 
-        // Position / index changes
-        this._settings.connect('changed::position', () => this._placeInPanel());
-        this._settings.connect('changed::index', () => this._placeInPanel());
+        // Reposition: follow hijridate's proven pattern
+        // (destroy from statusArea + destroy actor + create fresh + register)
+        this._sigPos = this._settings.connect('changed::position', () => {
+            this._replaceIndicator();
+        });
+        this._sigIdx = this._settings.connect('changed::index', () => {
+            this._replaceIndicator();
+        });
 
-        // Keepalive: every CLI call (changed::message) re-checks anchor.
-        // If something stole our indicator from the panel, this puts it back.
-        this._settings.connect('changed::message', () => this._ensureInPanel());
+        // Keepalive: if something externally orphaned the indicator,
+        // the next CLI call re-anchors it.
+        this._sigKeepalive = this._settings.connect('changed::message', () => {
+            this._ensureInPanel();
+        });
     }
 
     disable() {
+        for (const id of [this._sigPos, this._sigIdx, this._sigKeepalive]) {
+            try { this._settings.disconnect(id); } catch (_) {}
+        }
         if (this._indicator) {
             this._indicator.destroy();
             this._indicator = null;
@@ -203,52 +212,65 @@ export default class PanelMessagesExtension extends Extension {
         this._settings = null;
     }
 
-    /* ───── Panel placement ───── */
+    /* ───── Register via addToStatusArea (the ONLY placement method) ───── */
 
-    _placeInPanel() {
-        if (!this._indicator) return;
-
-        // Remove from old parent (if any) then insert at new position
-        const parent = this._indicator.get_parent();
-        if (parent) parent.remove_child(this._indicator);
-
+    _registerInPanel() {
         this._currentPos = this._settings.get_string('position') || 'far-right';
-        const index = this._settings.get_int('index');
+        this._currentIdx = this._settings.get_int('index');
 
-        switch (this._currentPos) {
-            case 'far-left':
-                Main.panel._leftBox.insert_child_at_index(this._indicator, 0);
-                break;
-            case 'left':  this._insertAt(Main.panel._leftBox, index);   break;
-            case 'center':this._insertAt(Main.panel._centerBox, index); break;
-            case 'right': this._insertAt(Main.panel._rightBox, index);  break;
-            case 'far-right':
-            default:
-                Main.panel.addToStatusArea(this.uuid, this._indicator, -1, 'right');
-                break;
+        const pos = this._currentPos;
+        const idx = this._currentIdx;
+
+        // Box & index: pass to addToStatusArea.
+        // For center: register in right box first, then move to center.
+        // For all others: addToStatusArea handles it.
+        if (pos === 'far-left' || pos === 'left') {
+            Main.panel.addToStatusArea(this.uuid, this._indicator, idx, 'left');
+        } else if (pos === 'center') {
+            // addToStatusArea only supports 'left'/'right', so we register
+            // with 'right' then immediately move to center.
+            Main.panel.addToStatusArea(this.uuid, this._indicator, 0, 'right');
+            // Move to center using proper index
+            const centerBox = Main.panel._centerBox;
+            const children = centerBox.get_children();
+            const targetIdx = Math.min(idx, children.length);
+            if (targetIdx < children.length)
+                centerBox.insert_child_at_index(this._indicator, targetIdx);
+            else
+                centerBox.add_child(this._indicator);
+        } else {
+            // right / far-right
+            Main.panel.addToStatusArea(this.uuid, this._indicator,
+                pos === 'far-right' ? -1 : idx, 'right');
         }
-
-        this._indicator.show();
     }
 
-    /** Re-anchor if the indicator was silently removed from the panel. */
+    /* ───── Hijridate-style replace: clean slate, no stale bookkeeping ───── */
+
+    _replaceIndicator() {
+        // Step 1: Wipe from statusArea so shell bookkeeping is clean
+        if (Main.panel.statusArea[this.uuid]) {
+            Main.panel.statusArea[this.uuid].destroy();
+        }
+        // Step 2: Destroy our reference
+        if (this._indicator) {
+            this._indicator.destroy();
+            this._indicator = null;
+        }
+        // Step 3: Create fresh indicator with existing settings
+        this._indicator = new Indicator(this._settings);
+        // Step 4: Register at new position
+        this._registerInPanel();
+    }
+
+    /* ───── Keepalive: re-anchor if the indicator was orphaned ───── */
+
     _ensureInPanel() {
-        if (!this._indicator || this._indicator.get_parent()) return;
+        if (!this._indicator || this._indicator.get_parent())
+            return;
 
-        // It's orphaned — put it back
-        const parent = this._indicator.get_parent();
-        const box = this._currentPos === 'center'   ? Main.panel._centerBox
-                  : this._currentPos === 'far-left' || this._currentPos === 'left'
-                    ? Main.panel._leftBox : Main.panel._rightBox;
-        box.add_child(this._indicator);
-        this._indicator.show();
-    }
-
-    _insertAt(box, index) {
-        const children = box.get_children();
-        if (index < 0 || index >= children.length)
-            box.add_child(this._indicator);
-        else
-            box.insert_child_at_index(this._indicator, index);
+        // The indicator has no parent — something removed it.
+        // Re-register cleanly via same path.
+        this._replaceIndicator();
     }
 }
