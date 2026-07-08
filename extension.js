@@ -1,6 +1,6 @@
 /* extension.js
  *
- * Panel Messages — A GNOME Shell extension that shows a message in the panel.
+ * Panel Messages — A GNOME Shell extension with CLI control.
  *
  * SPDX-License-Identifier: GPL-2.0-or-later
  */
@@ -28,15 +28,18 @@ const Indicator = GObject.registerClass(
             this._normalStyle = '';
             this._normalColor = null;
 
+            // Minimal padding — override theme defaults
+            this.style = 'padding: 0 1px;';
+
             const displayText = raw =>
                 raw === '' ? settings.get_string('default-text') : raw;
 
-            // ---- Panel label with padding via style ----
+            // ---- Panel label ----
             this._label = new St.Label({
                 text: displayText(settings.get_string('message')),
                 y_expand: true,
                 y_align: Clutter.ActorAlign.CENTER,
-                style: 'padding: 0 6px;',
+                style: 'padding: 0 2px;',
             });
             this.add_child(this._label);
 
@@ -60,40 +63,50 @@ const Indicator = GObject.registerClass(
             const popupSection = new PopupMenu.PopupMenuSection();
             popupSection.actor.add_child(this._entry);
             this.menu.addMenuItem(popupSection);
-            this.menu.actor.add_style_class_name('panel-message-entry');
 
             // ---- Apply persistent style ----
             this._applyStyle();
             this._cacheNormalColor();
 
             // ---- External GSettings watchers ----
-            this._sigMessage = settings.connect('changed::message', () => {
-                const text = settings.get_string('message');
-                this._label.text = displayText(text);
-                this._entry.text = displayText(text);
-            });
-            this._sigDefault = settings.connect('changed::default-text', () => {
-                const text = settings.get_string('message');
-                this._label.text = displayText(text);
-                this._entry.text = displayText(text);
-            });
-            this._sigColor = settings.connect('changed::color', () => {
-                this._applyStyle();
-                this._cacheNormalColor();
-            });
-            this._sigBold = settings.connect('changed::bold', () => {
-                this._applyStyle();
-            });
-            this._sigAlert = settings.connect('changed::alert', () => {
-                const count = settings.get_int('alert');
-                if (count !== this._alertCount) {
-                    this._alertCount = count;
-                    this._runAlert(
-                        settings.get_string('alert-color'),
-                        settings.get_double('alert-duration')
-                    );
-                }
-            });
+            this._connectSignals();
+        }
+
+        _connectSignals() {
+            const s = this._settings;
+            this._sig = [
+                s.connect('changed::message', () => {
+                    const text = s.get_string('message');
+                    this._label.text = this._displayText(text);
+                    this._entry.text = this._displayText(text);
+                }),
+                s.connect('changed::default-text', () => {
+                    const text = s.get_string('message');
+                    this._label.text = this._displayText(text);
+                    this._entry.text = this._displayText(text);
+                }),
+                s.connect('changed::color', () => {
+                    this._applyStyle();
+                    this._cacheNormalColor();
+                }),
+                s.connect('changed::bold', () => {
+                    this._applyStyle();
+                }),
+                s.connect('changed::alert', () => {
+                    const count = s.get_int('alert');
+                    if (count !== this._alertCount) {
+                        this._alertCount = count;
+                        this._runAlert(
+                            s.get_string('alert-color'),
+                            s.get_double('alert-duration')
+                        );
+                    }
+                }),
+            ];
+        }
+
+        _displayText(raw) {
+            return raw === '' ? this._settings.get_string('default-text') : raw;
         }
 
         _cacheNormalColor() {
@@ -107,7 +120,7 @@ const Indicator = GObject.registerClass(
         _applyStyle() {
             const color = this._settings.get_string('color');
             const bold = this._settings.get_boolean('bold');
-            const styles = ['padding: 0 6px;'];
+            const styles = ['padding: 0 2px;'];
             if (color) styles.push(`color: ${color}`);
             if (bold) styles.push('font-weight: bold');
             this._normalStyle = styles.join(' ');
@@ -128,26 +141,22 @@ const Indicator = GObject.registerClass(
             const ct = this._label.clutter_text;
             if (!ct) return;
 
-            // 1) Bold on, keep current colour
             const curColor = this._settings.get_string('color');
-            this._label.style = `padding: 0 6px; font-weight: bold;${curColor ? ` color: ${curColor};` : ''}`;
+            this._label.style =
+                `padding: 0 2px; font-weight: bold;${curColor ? ` color: ${curColor};` : ''}`;
 
-            // 2) Morph colour → alert
             ct.ease({
                 color: targetColor,
                 duration: morphMs,
                 mode: Clutter.AnimationMode.EASE_IN_OUT_QUAD,
                 onComplete: () => {
-                    // 3) Hold
                     GLib.timeout_add(GLib.PRIORITY_DEFAULT, holdMs, () => {
-                        // 4) Morph colour → normal
                         const fallback = Clutter.Color.from_string('#ffffff')[1];
                         ct.ease({
                             color: this._normalColor || fallback,
                             duration: morphMs,
                             mode: Clutter.AnimationMode.EASE_IN_OUT_QUAD,
                             onComplete: () => {
-                                // 5) Restore normal style
                                 this._label.style = this._normalStyle;
                             },
                         });
@@ -158,12 +167,10 @@ const Indicator = GObject.registerClass(
         }
 
         destroy() {
-            const s = this._settings;
-            if (!s) return;
-            for (const id of [this._sigMessage, this._sigDefault, this._sigColor,
-                               this._sigBold, this._sigAlert]) {
-                try { s.disconnect(id); } catch (_) {}
-            }
+            (this._sig || []).forEach(id => {
+                try { this._settings.disconnect(id); } catch (_) {}
+            });
+            this._sig = null;
             this._settings = null;
             super.destroy();
         }
@@ -176,26 +183,20 @@ export default class PanelMessagesExtension extends Extension {
     enable() {
         this._settings = this.getSettings();
         this._indicator = new Indicator(this._settings);
+        this._currentPos = this._settings.get_string('position') || 'far-right';
 
-        // Use the panel's official API — it handles bookkeeping internally
-        Main.panel.addToStatusArea(this.uuid, this._indicator);
+        this._placeInPanel();
 
-        // Listen for position/index changes.  Instead of repositioning the
-        // indicator ourselves (which can cause race conditions with the
-        // panel's own bookkeeping), we store the desired state and
-        // re-apply it via addToStatusArea.
-        this._posChanged = this._settings.connect('changed::position', () => {
-            this._reposition();
-        });
-        this._idxChanged = this._settings.connect('changed::index', () => {
-            this._reposition();
-        });
+        // Position / index changes
+        this._settings.connect('changed::position', () => this._placeInPanel());
+        this._settings.connect('changed::index', () => this._placeInPanel());
+
+        // Keepalive: every CLI call (changed::message) re-checks anchor.
+        // If something stole our indicator from the panel, this puts it back.
+        this._settings.connect('changed::message', () => this._ensureInPanel());
     }
 
     disable() {
-        for (const id of [this._posChanged, this._idxChanged]) {
-            try { this._settings.disconnect(id); } catch (_) {}
-        }
         if (this._indicator) {
             this._indicator.destroy();
             this._indicator = null;
@@ -203,39 +204,44 @@ export default class PanelMessagesExtension extends Extension {
         this._settings = null;
     }
 
-    /** Move the indicator to its configured position.
-     *
-     *  We always remove-then-reinsert.  Clutter actors that are already
-     *  children of a container are silently moved when added/inserted
-     *  into another container, so there is no risk of duplicates.
-     */
-    _reposition() {
+    /* ───── Panel placement ───── */
+
+    _placeInPanel() {
         if (!this._indicator) return;
 
+        // Remove from old parent (if any) then insert at new position
         const parent = this._indicator.get_parent();
         if (parent) parent.remove_child(this._indicator);
 
-        const position = this._settings.get_string('position') || 'far-right';
+        this._currentPos = this._settings.get_string('position') || 'far-right';
         const index = this._settings.get_int('index');
 
-        switch (position) {
+        switch (this._currentPos) {
             case 'far-left':
                 Main.panel._leftBox.insert_child_at_index(this._indicator, 0);
                 break;
-            case 'left':
-                this._insertAt(Main.panel._leftBox, index);
-                break;
-            case 'center':
-                this._insertAt(Main.panel._centerBox, index);
-                break;
-            case 'right':
+            case 'left':  this._insertAt(Main.panel._leftBox, index);   break;
+            case 'center':this._insertAt(Main.panel._centerBox, index); break;
+            case 'right': this._insertAt(Main.panel._rightBox, index);  break;
             case 'far-right':
             default:
-                Main.panel.addToStatusArea(this.uuid, this._indicator,
-                    position === 'right' ? index : -1, 'right');
+                Main.panel.addToStatusArea(this.uuid, this._indicator, -1, 'right');
                 break;
         }
 
+        this._indicator.show();
+    }
+
+    /** Re-anchor if the indicator was silently removed from the panel. */
+    _ensureInPanel() {
+        if (!this._indicator || this._indicator.get_parent()) return;
+
+        // It's orphaned — put it back
+        const parent = this._indicator.get_parent();
+        const box = this._currentPos === 'center'   ? Main.panel._centerBox
+                  : this._currentPos === 'far-left' || this._currentPos === 'left'
+                    ? Main.panel._leftBox : Main.panel._rightBox;
+        box.add_child(this._indicator);
         this._indicator.show();
     }
 
