@@ -1,17 +1,11 @@
 /* Panel Messages — custom styling */
 
-/* Minimise the panel button's built-in padding */
-.panel-button,
-PanelMenuButton {
-    padding: 0 2px !important;
-}
-
 /* Popup entry area */
-.popup-menu-item.panel-message-entry {
-    min-width: 24em;
+.panel-message-entry {
+    min-width: 22em;
     padding: 4px;
 }
 
-.popup-menu-item StEntry {
+.panel-message-entry StEntry {
     padding: 4px 8px;
 }

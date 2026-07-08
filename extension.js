@@ -28,8 +28,8 @@ const Indicator = GObject.registerClass(
             this._normalStyle = '';
             this._normalColor = null;
 
-            // Minimal padding — override theme defaults
-            this.style = 'padding: 0 1px;';
+            // Standard panel button sizing
+            this.style = 'padding: 0 4px;';
 
             const displayText = raw =>
                 raw === '' ? settings.get_string('default-text') : raw;
@@ -39,7 +39,6 @@ const Indicator = GObject.registerClass(
                 text: displayText(settings.get_string('message')),
                 y_expand: true,
                 y_align: Clutter.ActorAlign.CENTER,
-                style: 'padding: 0 2px;',
             });
             this.add_child(this._label);
 
@@ -120,10 +119,10 @@ const Indicator = GObject.registerClass(
         _applyStyle() {
             const color = this._settings.get_string('color');
             const bold = this._settings.get_boolean('bold');
-            const styles = ['padding: 0 2px;'];
+            const styles = [];
             if (color) styles.push(`color: ${color}`);
             if (bold) styles.push('font-weight: bold');
-            this._normalStyle = styles.join(' ');
+            this._normalStyle = styles.join('; ');
             this._label.style = this._normalStyle;
         }
 
@@ -143,7 +142,7 @@ const Indicator = GObject.registerClass(
 
             const curColor = this._settings.get_string('color');
             this._label.style =
-                `padding: 0 2px; font-weight: bold;${curColor ? ` color: ${curColor};` : ''}`;
+                `font-weight: bold;${curColor ? ` color: ${curColor};` : ''}`;
 
             ct.ease({
                 color: targetColor,
