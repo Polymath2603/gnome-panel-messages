@@ -71,6 +71,16 @@ In a cron job's prompt, include a `panel-message` call in the final instruction 
 - The extension watches GSettings `changed::*` signals — any `panel-message` call updates the panel live, no shell restart needed for message/style changes
 - Using `--alert` increments a counter; the extension detects the delta and runs a Clutter fade animation
 
+## Architecture (from GNOME Shell source)
+
+Key rules when working with `PanelMenu.Button`:
+
+- **`addToStatusArea` supports `'center'`** natively (maps to `_centerBox`). Don't manually move actors between boxes.
+- **Add `.container`, not the button itself.** `PanelMenu.Button` wraps itself in a `St.Bin` (`this.container`). `addToStatusArea` adds that wrapper. Manually adding the bare button to a panel box bypasses the shell's layout/cleanup and causes the indicator to disappear.
+- **`destroy` auto-cleans `statusArea`.** The shell connects a destroy handler that does `delete this.statusArea[role]`. Let the shell handle cleanup — don't manually null `statusArea` entries.
+- **For repositioning, destroy+recreate.** Hijridate pattern: destroy the old indicator (fires auto-cleanup), create a fresh one, call `addToStatusArea` again. Never manually `remove_child` from a panel box — it orphans the bookkeeping.
+- **Keepalive checks `container.get_parent()`.** The button's parent is the St.Bin wrapper, not the panel box. To detect if the indicator is actually anchored, check the container's parent.
+
 ## Troubleshooting
 
 - If the panel shows nothing: call `panel-message "test"` — the default is empty and placeholder only shows `—`
