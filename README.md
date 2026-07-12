@@ -135,6 +135,19 @@ cp docs/hermes-skill.md ~/.hermes/skills/productivity/panel-messages/SKILL.md
 
 ---
 
+## Donate
+
+If you find Panel Messages useful, consider supporting development:
+
+| Token | Address |
+|-------|---------|
+| BTC | `bc1q...your-bitcoin-address` |
+| ETH | `0x...your-ethereum-address` |
+| SOL | `...your-solana-address` |
+| XMR | `4...your-monero-address` |
+
+---
+
 ## Licence
 
 GPL-2.0-or-later

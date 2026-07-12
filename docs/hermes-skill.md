@@ -1,88 +1,29 @@
 ---
 name: panel-messages
-description: Use the Panel Messages GNOME extension to display progress/status in the top panel from background tasks, builds, cron jobs, and subagent delegations.
+description: Update the GNOME panel label from background tasks instead of sending the user a notification or chat message.
 category: productivity
-trigger: When you need to show a user what a background process is doing without interrupting them with a notification.
+trigger: When a background process finishes, a build step completes, or you want to show progress without interrupting the user.
 ---
 
-# Panel Messages — Hermes Agent Skill
+# Panel Messages
 
-The user has a **GNOME Shell extension** called **Panel Messages** at `~/Workplace/gnome-panel-messages/` that shows a customisable text label in the top GNOME panel. It's controlled by a CLI command `panel-message`.
+A CLI command `panel-message` that sets a text label in the GNOME top panel. Use it instead of sending the user a chat message — they see it at a glance without being interrupted.
 
-## When to use this
+## When to use
 
-**Instead of** sending a chat message saying "task X is done", call `panel-message` to update the panel. The user sees it at a glance without being interrupted.
+- Long builds, tests, or pipelines → `panel-message -q "step 2/5"`
+- Background subagent finishes → `panel-message -q "✅ extraction done" --color=green`
+- cron job progress → `panel-message -q "⏰ job running"`
+- Important event → `panel-message --alert "check this"`
 
-Good for:
-- Long-running builds or tests
-- Background subagent delegations (`delegate_task`)
-- cron jobs that need to signal progress
-- Any multi-step pipeline where you want to show "step N of M"
-
-## CLI Usage
-
-All `panel-message` calls below are **terminal commands** — run them via `terminal()`.
+## Commands (run via terminal)
 
 ```bash
 panel-message "text"                          # Set message
-panel-message -q "text"                       # Set silently (no stdout)
+panel-message -q "text"                       # Quiet (no stdout, for scripts)
 panel-message -c                              # Clear
-panel-message --alert "text"                  # Set + flash red bold
-panel-message --alert=#ff8800 "warning text"  # Alert with custom colour
-panel-message --color=green --bold "done ✓"   # Persistent style
-panel-message --position=center               # Move panel indicator
-panel-message --index=5                       # Change ordering
+panel-message --alert "text"                  # Set + red flash
+panel-message --color=green --bold "done ✓"   # Styled
+panel-message --position=center               # Move panel position
 panel-message --style                         # Show current settings
 ```
-
-## Patterns
-
-### Pipeline progress (step-by-step from a single task)
-
-```bash
-panel-message -q "🔧 Step 1/3: preparing…"
-do_step_1
-panel-message -q "🔧 Step 2/3: processing…"
-do_step_2
-panel-message -q "🔧 Step 3/3: finishing…"
-do_step_3
-panel-message -q "✅ Done" --color=green
-```
-
-### From a background subagent
-
-After dispatching a `delegate_task`, the parent can leave a panel message so the user knows something is running:
-
-```bash
-panel-message -q "📄 Extracting facts from 6 files…"
-delegate_task goal="fact extraction" ...
-panel-message -q "✅ Extraction complete" --color=green
-```
-
-### From a cron job
-
-In a cron job's prompt, include a `panel-message` call in the final instruction so the panel updates when the job runs.
-
-## Extension details
-
-- **Location**: `~/Workplace/gnome-panel-messages/`
-- **UUID**: `panel-messages@leonardo.local`
-- **GSettings schema**: `org.gnome.shell.extensions.panel-messages`
-- The extension watches GSettings `changed::*` signals — any `panel-message` call updates the panel live, no shell restart needed for message/style changes
-- Using `--alert` increments a counter; the extension detects the delta and runs a Clutter fade animation
-
-## Architecture (from GNOME Shell source)
-
-Key rules when working with `PanelMenu.Button`:
-
-- **`addToStatusArea` supports `'center'`** natively (maps to `_centerBox`). Don't manually move actors between boxes.
-- **Add `.container`, not the button itself.** `PanelMenu.Button` wraps itself in a `St.Bin` (`this.container`). `addToStatusArea` adds that wrapper. Manually adding the bare button to a panel box bypasses the shell's layout/cleanup and causes the indicator to disappear.
-- **`destroy` auto-cleans `statusArea`.** The shell connects a destroy handler that does `delete this.statusArea[role]`. Let the shell handle cleanup — don't manually null `statusArea` entries.
-- **For repositioning, destroy+recreate.** Hijridate pattern: destroy the old indicator (fires auto-cleanup), create a fresh one, call `addToStatusArea` again. Never manually `remove_child` from a panel box — it orphans the bookkeeping.
-- **Keepalive checks `container.get_parent()`.** The button's parent is the St.Bin wrapper, not the panel box. To detect if the indicator is actually anchored, check the container's parent.
-
-## Troubleshooting
-
-- If the panel shows nothing: call `panel-message "test"` — the default is empty and placeholder only shows `—`
-- If gsettings schema not found: run `glib-compile-schemas ~/.local/share/glib-2.0/schemas/`
-- If the CLI command isn't found: `cp ~/Workplace/gnome-panel-messages/bin/panel-message ~/.local/bin/panel-message`

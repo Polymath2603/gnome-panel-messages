@@ -42,7 +42,7 @@ SET_DEFAULT=""
 SHOW_STYLE=false
 CLEAR=false
 
-# ── Parse options ───────────────────────────────────────────
+# ── Parse options ──
 while [[ $# -gt 0 ]]; do
     case "$1" in
         -q|--quiet) QUIET=true; shift ;;
@@ -96,7 +96,7 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# ── Validate position ──────────────────────────────────────
+# ── Validate position ──
 if [[ -n "$SET_POSITION" ]]; then
     case "$SET_POSITION" in
         far-left|left|center|right|far-right) ;;
@@ -104,7 +104,7 @@ if [[ -n "$SET_POSITION" ]]; then
     esac
 fi
 
-# ── Apply settings ──────────────────────────────────────────
+# ── Apply settings ──
 APPLIED=false
 
 if [[ -n "$SET_COLOR" ]]; then
@@ -146,7 +146,7 @@ if $CLEAR; then
     APPLIED=true
 fi
 
-# ── Alert (must come after text/color so the flash uses final state) ──
+# ── Alert ──
 if $ALERT; then
     if [[ -n "$ALERT_COLOR" ]]; then
         gsettings set "$SCHEMA" "$KEY_ALERT_COLOR" "$ALERT_COLOR"
@@ -159,7 +159,7 @@ if $ALERT; then
     APPLIED=true
 fi
 
-# ── Show style ──────────────────────────────────────────────
+# ── Show style ──
 if $SHOW_STYLE; then
     echo "Message:      $(gsettings get $SCHEMA $KEY_MESSAGE)"
     echo "Default text: $(gsettings get $SCHEMA $KEY_DEFAULT)"
@@ -171,13 +171,13 @@ if $SHOW_STYLE; then
     APPLIED=true
 fi
 
-# ── Fallback: read mode ─────────────────────────────────────
+# ── Fallback: read mode ──
 if ! $APPLIED && ! $CLEAR; then
     current=$(gsettings get "$SCHEMA" "$KEY_MESSAGE")
     echo "$current"
 fi
 
-# ── Quiet-mode summary ──────────────────────────────────────
+# ── Quiet-mode summary ──
 if ! $QUIET && $APPLIED && [[ -n "$SET_TEXT" ]]; then
     echo "✓ Panel message set"
 fi

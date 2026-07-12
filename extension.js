@@ -177,8 +177,7 @@ export default class PanelMessagesExtension extends Extension {
         this._settings.connect('changed::position', () => this._replaceIndicator());
         this._settings.connect('changed::index', () => this._replaceIndicator());
 
-        // Keepalive: on every CLI call, verify the indicator's container
-        // is still anchored in a panel box.  If not, replace cleanly.
+        // Re-anchor if the indicator was orphaned by panel layout changes.
         this._settings.connect('changed::message', () => this._ensureInPanel());
     }
 
@@ -222,7 +221,7 @@ export default class PanelMessagesExtension extends Extension {
         }
     }
 
-    /* ───── Destroy + recreate (hijridate pattern) ───── */
+    /* ───── Destroy + recreate ───── */
 
     _replaceIndicator() {
         // Destroying the indicator fires its auto-cleanup handler
@@ -241,9 +240,7 @@ export default class PanelMessagesExtension extends Extension {
         if (!this._indicator)
             return;
 
-        // The indicator is inside a St.Bin (.container).
-        // That Bin is what gets added to the panel box.
-        // If the Bin has no parent, we're orphaned.
+        // If the container has no parent, it was orphaned — replace cleanly.
         const container = this._indicator.container;
         if (container && container.get_parent())
             return; // still anchored
