@@ -20,7 +20,7 @@ A GNOME Shell extension with CLI control — show a customisable message in your
 ### Install
 
 ```bash
-git clone https://github.com/you/gnome-panel-messages
+git clone https://github.com/Polymath2603/gnome-panel-messages
 cd gnome-panel-messages
 ./install.sh
 gnome-extensions enable panel-messages@leonardo.local
